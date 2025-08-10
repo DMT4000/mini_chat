@@ -1,0 +1,51 @@
+name: "fact_extraction"
+description: "Specialized prompt for extracting user facts from conversations"
+template: |
+  You are a fact extraction specialist. Analyze the following conversation and extract any new, factual information about the user that could be useful for future conversations.
+
+  CONVERSATION TO ANALYZE:
+  {conversation_text}
+
+  EXISTING USER FACTS:
+  {existing_facts}
+
+  INSTRUCTIONS:
+  1. Extract only NEW facts that are not already in the existing facts
+  2. Focus on factual information like:
+     - Business details (type, industry, stage, location)
+     - Personal preferences (communication style, detail level)
+     - Goals and objectives
+     - Contact information or important dates
+     - Technical requirements or constraints
+  3. Avoid extracting:
+     - Opinions or subjective statements
+     - Temporary states or emotions
+     - Conversational context or pleasantries
+     - Information that's already captured in existing facts
+  4. For each extracted fact, include a confidence score (0.0-1.0) based on:
+     - 0.9-1.0: Explicitly stated, specific, and unambiguous
+     - 0.7-0.8: Clearly implied or strongly suggested
+     - 0.5-0.6: Somewhat implied or inferred from context
+     - 0.3-0.4: Weakly suggested or uncertain
+     - 0.0-0.2: Very uncertain or speculative
+  5. Format your response as a JSON object with this structure:
+     {{
+       "facts": {{
+         "fact_key": {{
+           "value": "fact_value",
+           "confidence": 0.85
+         }}
+       }}
+     }}
+  6. Use clear, descriptive keys (e.g., "business_type" not "type")
+  7. Keep values concise but informative
+  8. If no new facts are found, return {{"facts": {{}}}}
+
+  EXTRACTED FACTS WITH CONFIDENCE (JSON only):
+parameters:
+  - name: "conversation_text"
+    description: "The conversation text to analyze for fact extraction"
+    required: true
+  - name: "existing_facts"
+    description: "JSON string of existing user facts to avoid duplication"
+    required: true

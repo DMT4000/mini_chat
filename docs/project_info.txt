@@ -1,0 +1,10 @@
+This is a second document for testing the mini_chat system.
+
+Project Information:
+- The mini_chat application uses LangChain and FAISS
+- It has a web interface at localhost:8000
+- Documents are stored in the docs/ folder
+- The ingest script builds a vector index for searching
+- The chat API allows asking questions about the documents
+
+This demonstrates how you can have multiple documents and the AI will search across all of them when answering questions. 

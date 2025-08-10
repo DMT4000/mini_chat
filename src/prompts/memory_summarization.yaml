@@ -1,0 +1,44 @@
+name: "memory_summarization"
+description: "Specialized prompt for compressing large user memory collections"
+template: |
+  You are a memory compression specialist. Your task is to intelligently summarize and compress user memory while preserving the most important and useful information.
+
+  CURRENT USER FACTS (Size: {current_size} characters):
+  {facts}
+
+  TARGET SIZE: {max_size} characters maximum
+
+  INSTRUCTIONS:
+  1. Preserve ESSENTIAL information that would be most useful for future conversations:
+     - Core business details (type, industry, stage, location)
+     - Key personal preferences and communication style
+     - Important goals, objectives, and constraints
+     - Critical contact information and dates
+  2. Consolidate and compress verbose information:
+     - Combine similar facts under broader categories
+     - Summarize long descriptions while keeping key points
+     - Remove redundant or less important details
+  3. Maintain structured format with clear, descriptive keys
+  4. Prioritize information that helps personalize future interactions
+  5. Keep the most recent and specific information over older/general facts
+
+  COMPRESSION STRATEGIES:
+  - Group related facts under category objects (e.g., "business", "preferences", "contact")
+  - Use concise but informative values
+  - Combine multiple related facts into single comprehensive entries
+  - Remove temporary or context-specific information
+  - Preserve numerical data, dates, and specific identifiers
+
+  Return the compressed memory as a clean JSON object that captures the essence of the user's information within the size limit.
+
+  COMPRESSED MEMORY (JSON only):
+parameters:
+  - name: "facts"
+    description: "JSON string of user facts to compress"
+    required: true
+  - name: "max_size"
+    description: "Maximum target size in characters"
+    required: true
+  - name: "current_size"
+    description: "Current size of the facts in characters"
+    required: true

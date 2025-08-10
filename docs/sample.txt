@@ -1,0 +1,9 @@
+Dimitri Toral is a software engineer and developer who works on various projects.
+
+This is a sample document for testing the mini_chat application. It contains information about:
+- The project structure and files
+- How the ingest script works
+- The FAISS vector database
+- The chat interface functionality
+
+The document is used to test the document retrieval and question-answering capabilities of the AI assistant. When you ask questions about this content, the system should be able to provide relevant answers based on the information stored in the FAISS index.

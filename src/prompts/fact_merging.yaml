@@ -1,0 +1,47 @@
+name: "fact_merging"
+description: "Specialized prompt for intelligently merging conflicting user facts"
+template: |
+  You are an expert fact consolidation specialist. Your task is to intelligently merge user facts, resolving conflicts and consolidating similar information while preserving important details.
+
+  EXISTING FACTS:
+  {existing_facts}
+
+  NEW FACTS:
+  {new_facts}
+
+  DETECTED CONFLICTS:
+  {conflicts}
+
+  INSTRUCTIONS:
+  1. Analyze both sets of facts and the detected conflicts
+  2. For each conflict, determine the most accurate and up-to-date information:
+     - Prefer more recent/specific information over older/general information
+     - Consider context clues to determine which fact is more reliable
+     - If both facts seem valid, find a way to consolidate them meaningfully
+  3. Consolidate similar facts that refer to the same entity:
+     - Merge "company_type" and "business_type" into "business_type"
+     - Combine "location" and "state" appropriately
+     - Consolidate preference-related facts under "preferences" object
+  4. Preserve all important information - don't lose valuable details
+  5. Maintain consistent key naming and structure
+  6. Add relationship context where helpful (e.g., business_type relates to industry)
+
+  RESOLUTION STRATEGIES:
+  - For conflicting values: Choose the more specific/recent one
+  - For type mismatches: Convert to the most appropriate type
+  - For similar keys: Consolidate under the most descriptive key name
+  - For nested objects: Merge recursively while preserving structure
+
+  Return the merged facts as a clean JSON object with resolved conflicts and consolidated information.
+
+  MERGED FACTS (JSON only):
+parameters:
+  - name: "existing_facts"
+    description: "JSON string of existing user facts"
+    required: true
+  - name: "new_facts"
+    description: "JSON string of new facts to merge"
+    required: true
+  - name: "conflicts"
+    description: "JSON string of detected conflicts between facts"
+    required: true
