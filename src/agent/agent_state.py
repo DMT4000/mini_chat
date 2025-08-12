@@ -40,6 +40,7 @@ def validate_agent_state(state: Dict[str, Any]) -> bool:
     Returns:
         bool: True if state is valid, False otherwise
     """
+    # Core fields required for a valid state
     required_fields = {
         'user_id': str,
         'question': str,
@@ -48,16 +49,25 @@ def validate_agent_state(state: Dict[str, Any]) -> bool:
         'answer': str,
         'newly_extracted_facts': dict,
         'conversation_history': list,
+    }
+
+    # Optional fields introduced by routing and confidence features
+    optional_fields = {
         'command_type': str,
         'question_type': str,
-        'confidence_scores': dict
+        'confidence_scores': dict,
     }
     
-    # Check all required fields are present
+    # Check all required fields are present with correct types
     for field, expected_type in required_fields.items():
         if field not in state:
             return False
         if not isinstance(state[field], expected_type):
+            return False
+    
+    # Validate optional fields if present
+    for field, expected_type in optional_fields.items():
+        if field in state and not isinstance(state[field], expected_type):
             return False
     
     # Validate conversation_history structure

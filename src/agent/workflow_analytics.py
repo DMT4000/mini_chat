@@ -184,10 +184,10 @@ class WorkflowAnalytics:
             avg_time = self.efficiency_metrics['average_response_time']
             time_score = max(0.0, 1.0 - (avg_time / 10.0))  # Assume 10s is poor performance
             
-            # Accuracy efficiency (success rate)
-            successful_executions = sum(1 for record in self.execution_history 
-                                      if record.get('success', False))
-            accuracy_score = successful_executions / len(self.execution_history) if self.execution_history else 0.0
+            # Accuracy efficiency (success rate) — only count execution records
+            execution_records = [r for r in self.execution_history if 'success' in r]
+            successful_executions = sum(1 for record in execution_records if record.get('success', False))
+            accuracy_score = (successful_executions / len(execution_records)) if execution_records else 0.0
             
             # Satisfaction efficiency (proxy: lightweight path usage)
             total_paths = (self.efficiency_metrics['lightweight_path_count'] + 

@@ -20,7 +20,9 @@ class ChatPipeline:
         if os.path.exists("faiss_index"):
             try:
                 embeddings = OpenAIEmbeddings()
-                retriever = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True).as_retriever()
+                # Avoid unsafe deserialization by default. Enable only if explicitly allowed.
+                allow_unsafe = os.getenv("ALLOW_FAISS_DESERIALIZATION", "false").lower() in {"1", "true", "yes"}
+                retriever = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=allow_unsafe).as_retriever()
                 print("✅ FAISS index loaded successfully.")
                 return retriever
             except Exception as e:

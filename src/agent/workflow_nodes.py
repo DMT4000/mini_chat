@@ -49,10 +49,13 @@ class WorkflowNodes:
         if os.path.exists("faiss_index"):
             try:
                 embeddings = OpenAIEmbeddings()
+                # Avoid unsafe deserialization by default. Enable only if explicitly allowed.
+                import os as _os
+                allow_unsafe = _os.getenv("ALLOW_FAISS_DESERIALIZATION", "false").lower() in {"1", "true", "yes"}
                 retriever = FAISS.load_local(
                     "faiss_index", 
                     embeddings, 
-                    allow_dangerous_deserialization=True
+                    allow_dangerous_deserialization=allow_unsafe
                 ).as_retriever()
                 print("✅ FAISS index loaded successfully for workflow.")
                 return retriever

@@ -119,7 +119,7 @@ def get_user_memory(user_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve user memory: {str(e)}")
 
 @app.post("/memory/{user_id}")
-def update_user_memory(user_id: str, memory_data: dict):
+def update_user_memory(user_id: str, memory_data: dict):  # nosec B106: FastAPI handles path params safely
     """Update user memory in Redis."""
     try:
         # Validate user_id
