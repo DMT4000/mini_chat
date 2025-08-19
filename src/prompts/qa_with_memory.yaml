@@ -9,6 +9,10 @@ template: |
   Here are relevant documents that may help answer the question:
   {context}
 
+  ## Recent Conversation Context
+  Use the following brief recap of the recent messages to maintain continuity and avoid repetition:
+  {conversation}
+
   ## User Question
   {question}
 
@@ -21,10 +25,13 @@ template: |
   - If information conflicts between user background and documentation, prioritize the documentation for factual accuracy but acknowledge the user's specific situation
 
   ## Response
-  Provide a helpful, personalized response:
+  Provide a helpful, personalized response. Important grounding rules:
+  - If the document context says "No relevant documents were retrieved", do NOT claim you saw, read, or loaded any documents. Instead, answer based on user background and request more info if needed.
+  - Do not state a specific number of documents unless the context explicitly provides that count.
 
 input_variables:
   - user_facts
   - context
+  - conversation
   - question
 created: "2024-01-01T00:00:00"

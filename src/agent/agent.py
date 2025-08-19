@@ -47,17 +47,17 @@ class Agent:
     def _initialize_workflow(self):
         """Initialize and compile the agent workflow."""
         try:
-            print("🤖 Initializing Agent workflow...")
+            print("Initializing Agent workflow...")
             agent_logger.info("Initializing Agent workflow")
             
             self.workflow = create_agent_workflow()
             
-            print("✅ Agent initialized successfully")
+            print("Agent initialized successfully")
             agent_logger.info("Agent workflow initialized successfully")
             
         except Exception as e:
             error_msg = f"Failed to initialize Agent workflow: {str(e)}"
-            print(f"❌ {error_msg}")
+            print(f"Error: {error_msg}")
             agent_logger.error(error_msg)
             raise RuntimeError(error_msg)
     
@@ -98,8 +98,8 @@ class Agent:
         execution_start = datetime.now()
         session_id = self._get_or_create_session_id(user_id, session_config)
         
-        print(f"🗣️ Processing conversation for user: {user_id}")
-        print(f"❓ Question: {question[:100]}{'...' if len(question) > 100 else ''}")
+        print(f"Processing conversation for user: {user_id}")
+        print(f"Question: {question[:100]}{'...' if len(question) > 100 else ''}")
         
         if self.enable_debug_logging:
             agent_logger.info(f"Starting conversation turn for user {user_id}, session {session_id}")
@@ -135,7 +135,7 @@ class Agent:
                 'timestamp': datetime.now().isoformat()
             }
             
-            print(f"✅ Conversation completed in {execution_time:.2f}s")
+            print(f"Conversation completed in {execution_time:.2f}s")
             
             if self.enable_debug_logging:
                 agent_logger.info(f"Conversation turn completed for user {user_id} in {execution_time:.2f}s")
@@ -147,7 +147,7 @@ class Agent:
             execution_time = (datetime.now() - execution_start).total_seconds()
             error_msg = f"Conversation execution failed for user {user_id}: {str(e)}"
             
-            print(f"❌ {error_msg}")
+            print(f"Error: {error_msg}")
             agent_logger.error(error_msg)
             
             # Create error response
@@ -415,14 +415,14 @@ def create_agent(enable_debug_logging: bool = True) -> Agent:
         RuntimeError: If agent creation fails
     """
     try:
-        print("🏗️ Creating new Agent instance...")
+        print("Creating new Agent instance...")
         agent = Agent(enable_debug_logging=enable_debug_logging)
-        print("✅ Agent created successfully")
+        print("Agent created successfully")
         return agent
         
     except Exception as e:
         error_msg = f"Failed to create Agent: {str(e)}"
-        print(f"❌ {error_msg}")
+        print(f"Error: {error_msg}")
         agent_logger.error(error_msg)
         raise RuntimeError(error_msg)
 

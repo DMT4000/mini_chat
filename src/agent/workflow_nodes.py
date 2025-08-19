@@ -10,9 +10,10 @@ This module implements the individual nodes that make up the agent workflow:
 
 import os
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from .config import MODEL_NAME, llm_kwargs_for
 from dotenv import load_dotenv
 
 from .agent_state import AgentState, update_state_field
@@ -36,7 +37,8 @@ class WorkflowNodes:
     def _init_llm(self) -> ChatOpenAI:
         """Initialize the language model."""
         try:
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+            # Use conditional kwargs to avoid temperature errors on reasoning models
+            llm = ChatOpenAI(**llm_kwargs_for(MODEL_NAME))
             print("✅ Language Model initialized for workflow nodes.")
             return llm
         except Exception as e:
@@ -110,13 +112,47 @@ def retrieve_context(state: AgentState) -> AgentState:
             print(f"⚠️ Warning: Could not retrieve user memory: {e}")
             user_facts = {}
         
-        # 2. Retrieve relevant documents from FAISS
-        retrieved_docs = []
+        # 2. Retrieve relevant documents from FAISS using a richer query and apply a context budget
+        retrieved_docs: List[str] = []
         try:
             if nodes.retriever:
-                docs = nodes.retriever.get_relevant_documents(state['question'])
-                retrieved_docs = [doc.page_content for doc in docs]
-                print(f"✅ Retrieved {len(retrieved_docs)} relevant documents")
+                retrieval_query = _build_retrieval_query(
+                    question=state['question'],
+                    user_facts=user_facts,
+                    conversation_history=state.get('conversation_history', [])
+                )
+                docs = nodes.retriever.get_relevant_documents(retrieval_query)
+
+                # Optional lightweight re-ranking by simple overlap score with the original question
+                def _score(doc_text: str) -> int:
+                    lowered = doc_text.lower()
+                    score = 0
+                    for token in state['question'].lower().split():
+                        if len(token) > 3 and token in lowered:
+                            score += 1
+                    return score
+
+                ranked_docs = sorted(docs, key=lambda d: _score(getattr(d, 'page_content', '')), reverse=True)
+
+                # Apply budget: top N docs and total char cap
+                MAX_DOCS = 6
+                MAX_TOTAL_CHARS = 12000
+                MAX_PER_DOC_CHARS = 2200
+                total = 0
+                for doc in ranked_docs[:MAX_DOCS]:
+                    content = getattr(doc, 'page_content', '') or ''
+                    if not content:
+                        continue
+                    truncated = content[:MAX_PER_DOC_CHARS]
+                    if total + len(truncated) > MAX_TOTAL_CHARS:
+                        remaining = max(0, MAX_TOTAL_CHARS - total)
+                        if remaining == 0:
+                            break
+                        truncated = truncated[:remaining]
+                    retrieved_docs.append(truncated)
+                    total += len(truncated)
+
+                print(f"✅ Retrieved {len(retrieved_docs)} relevant documents (budgeted {total} chars)")
             else:
                 print("⚠️ Warning: FAISS retriever not available")
         except Exception as e:
@@ -170,15 +206,66 @@ def generate_answer(state: AgentState) -> AgentState:
         
         nodes = generate_answer._nodes
         
-        # 1. Engineer context by combining user facts with documents
-        engineered_context = _engineer_context(state['user_facts'], state['retrieved_docs'])
+        # 0. Deterministic short-circuits for common intents/questions to avoid verbose/unwanted output
+        try:
+            intent = state.get('intent', '')
+            entities = state.get('entities', {}) or {}
+            question_lower = state['question'].strip().lower()
+
+            # If the user provided profile info (e.g., name), acknowledge briefly
+            if intent == 'provide_profile_info':
+                name_val = entities.get('name')
+                if name_val:
+                    answer = f"Nice to meet you, {name_val}. I'll remember that."
+                else:
+                    answer = "Thanks, I will remember that information."
+                return update_state_field(state, 'answer', answer)
+
+            # If user asks for their name and we have it, answer directly; else ask to provide
+            if ("what is my name" in question_lower or question_lower == "my name?"):
+                stored_name = None
+                user_facts = state.get('user_facts', {}) or {}
+                for key in ['name', 'user_name', 'full_name']:
+                    if key in user_facts and str(user_facts[key]).strip():
+                        stored_name = str(user_facts[key]).strip()
+                        break
+                if stored_name:
+                    return update_state_field(state, 'answer', f"Your name is {stored_name}.")
+                else:
+                    return update_state_field(state, 'answer', "I don't have your name yet. You can tell me by saying, 'my name is ...'.")
+        except Exception:
+            pass
+
+        # Short-circuit: identity questions answered directly from memory
+        try:
+            if state.get('intent') == 'ask_identity':
+                name = (state.get('user_facts') or {}).get('name')
+                answer = f"Your name is {name}." if name else "I don’t have your name yet — tell me and I’ll remember."
+                return update_state_field(state, 'answer', answer)
+        except Exception:
+            pass
+
+        # 1. Engineer context by combining user facts with documents and recent conversation summary
+        conversation_context = _summarize_recent_conversation(state.get('conversation_history', []))
+        engineered_context = _engineer_context(
+            state['user_facts'], state['retrieved_docs'], conversation_context
+        )
         
         # 2. Generate response using enhanced prompt template
         try:
+            # Strengthen grounding: If no retrieved docs, steer model away from claiming it "saw" documents
+            context_for_prompt = engineered_context["document_context"]
+            if not state.get('retrieved_docs'):
+                context_for_prompt = (
+                    "No relevant documents were retrieved for this question. "
+                    "Answer based on user background and ask for more details if needed."
+                )
+
             prompt = nodes.prompt_registry.get(
                 "qa_with_memory",
                 user_facts=engineered_context["user_facts_str"],
-                context=engineered_context["document_context"],
+                context=context_for_prompt,
+                conversation=engineered_context["conversation_context"],
                 question=state['question']
             )
             
@@ -237,6 +324,15 @@ def extract_facts(state: AgentState) -> AgentState:
             extract_facts._nodes = WorkflowNodes()
         
         nodes = extract_facts._nodes
+
+        # If user explicitly provided profile info (e.g., name), save directly without LLM
+        try:
+            if state.get('intent') == 'provide_profile_info':
+                name = (state.get('entities') or {}).get('name')
+                if name:
+                    return update_state_field(state, 'newly_extracted_facts', {"name": name})
+        except Exception:
+            pass
         
         # 1. Prepare conversation context for fact extraction
         conversation_text = f"User Question: {state['question']}\n\nAssistant Answer: {state['answer']}"
@@ -312,29 +408,10 @@ def lightweight_response(state: AgentState) -> AgentState:
         
         question = state['question'].strip().lower()
         
-        # Handle greetings with personalized responses
+        # Handle greetings with concise responses; tailor for first vs subsequent turn
         if state['question_type'] == 'greeting':
-            greeting_responses = {
-                'hi': "Hello! I'm here to help you with your business questions. What would you like to know?",
-                'hello': "Hi there! I'm your AI co-founder assistant. How can I help you today?",
-                'hey': "Hey! Ready to tackle some business challenges together? What's on your mind?",
-                'good morning': "Good morning! Hope you're having a great start to your day. What can I help you with?",
-                'good afternoon': "Good afternoon! How can I assist you with your business today?",
-                'good evening': "Good evening! What business questions can I help you with tonight?",
-                'thanks': "You're very welcome! I'm always here to help with your business needs.",
-                'thank you': "My pleasure! Feel free to ask me anything about business formation, compliance, or strategy.",
-                'bye': "Goodbye! Feel free to come back anytime you need business advice. Take care!",
-                'goodbye': "See you later! I'll be here whenever you need help with your business journey.",
-            }
-            
-            # Find matching greeting
-            for greeting, response in greeting_responses.items():
-                if greeting in question:
-                    answer = response
-                    break
-            else:
-                # Default greeting response
-                answer = "Hello! I'm your AI co-founder assistant. I'm here to help you with business formation, compliance, and strategic advice. What would you like to know?"
+            is_first_turn = len(state.get('conversation_history', [])) == 0
+            answer = "Hey! How can I help?" if is_first_turn else "Hey again — what do you need?"
         
         # Handle simple questions with basic responses
         elif state['question_type'] == 'simple':
@@ -343,6 +420,14 @@ def lightweight_response(state: AgentState) -> AgentState:
                 answer = f"That's a great question! To give you the most helpful answer, could you provide a bit more context about your specific situation? I'm here to help with detailed business advice tailored to your needs."
             else:
                 answer = "I'd be happy to help! Could you tell me more about what you're looking for? The more details you can share, the better I can assist you with your business needs."
+
+            # If this simple question is actually about documents, nudge into specificity rather than generic marketing
+            try:
+                from .workflow_router import is_document_question
+                if is_document_question(state.get('question', '')):
+                    answer = "I can check the documents by running a full retrieval step. Ask your question specifically about the docs, or say 'check my documents' to proceed."
+            except Exception:
+                pass
         
         else:
             # Fallback for other lightweight cases
@@ -353,8 +438,7 @@ def lightweight_response(state: AgentState) -> AgentState:
         # Update state with lightweight answer
         updated_state = update_state_field(state, 'answer', answer)
         
-        # Set empty values for fields not needed in lightweight path
-        updated_state = update_state_field(updated_state, 'user_facts', {})
+        # Do not blank user_facts; simply avoid using them in lightweight path
         updated_state = update_state_field(updated_state, 'retrieved_docs', [])
         updated_state = update_state_field(updated_state, 'newly_extracted_facts', {})
         
@@ -404,16 +488,30 @@ def save_facts(state: AgentState) -> AgentState:
         
         # 2. Merge facts with intelligent conflict resolution using LLM
         try:
+            # Pass confidence scores when available to protect identity facts from low-confidence overrides
             merged_facts = nodes.advanced_fact_manager.merge_facts_intelligently(
                 state['user_facts'], 
-                state['newly_extracted_facts']
+                state['newly_extracted_facts'],
+                confidence_scores=state.get('confidence_scores', {})
             )
-            
+
+            # Optional summarization to keep memory compact well below Redis hard limits
+            try:
+                serialized_len = len(json.dumps(merged_facts))
+                if serialized_len > 10000:  # ~10KB
+                    target_size = 8000
+                    merged_facts = nodes.advanced_fact_manager.summarize_memory(
+                        merged_facts, max_size=target_size
+                    )
+                    print(f"📝 Memory summarized before save (target {target_size} chars)")
+            except Exception as summarize_err:
+                print(f"⚠️ Memory summarization skipped due to error: {summarize_err}")
+
             # 3. Save updated memory to Redis
             nodes.memory_manager.save_user_memory(state['user_id'], merged_facts)
-            
+
             print(f"✅ Saved {len(state['newly_extracted_facts'])} new facts to memory using intelligent merging")
-            
+
         except Exception as e:
             print(f"❌ Error saving facts to memory: {e}")
             # Continue without saving rather than failing
@@ -441,7 +539,7 @@ def save_facts(state: AgentState) -> AgentState:
 
 # Helper functions
 
-def _engineer_context(user_facts: Dict[str, Any], retrieved_docs: List[str]) -> Dict[str, str]:
+def _engineer_context(user_facts: Dict[str, Any], retrieved_docs: List[str], conversation_context: Optional[str] = None) -> Dict[str, str]:
     """
     Combine user facts with document context for prompt engineering.
     
@@ -474,8 +572,54 @@ def _engineer_context(user_facts: Dict[str, Any], retrieved_docs: List[str]) -> 
     
     return {
         "user_facts_str": user_facts_str,
-        "document_context": document_context
+        "document_context": document_context,
+        "conversation_context": conversation_context or ""
     }
+
+
+def _build_retrieval_query(question: str, user_facts: Dict[str, Any], conversation_history: List[Dict[str, Any]]) -> str:
+    """
+    Build a richer retrieval query using the question, a small selection of high-signal facts,
+    and a brief summary of recent conversation turns.
+    """
+    # Take top few facts for query enrichment
+    fact_items: List[str] = []
+    for key, value in list(user_facts.items())[:5]:
+        if isinstance(value, dict):
+            # include one nested item per nested dict to keep query short
+            for sub_key, sub_value in value.items():
+                fact_items.append(f"{key}.{sub_key}={sub_value}")
+                break
+        else:
+            fact_items.append(f"{key}={value}")
+
+    recent_summary = _summarize_recent_conversation(conversation_history, max_chars=280)
+    enriched = " ".join(fact_items)
+    parts = [question]
+    if enriched:
+        parts.append(f"[facts: {enriched}]")
+    if recent_summary:
+        parts.append(f"[recent: {recent_summary}]")
+    return " ".join(parts)
+
+
+def _summarize_recent_conversation(conversation_history: List[Dict[str, Any]], max_messages: int = 6, max_chars: int = 1000) -> str:
+    """
+    Produce a compact plaintext summary of the last few conversation messages for prompt/retrieval use.
+    """
+    if not conversation_history:
+        return ""
+    recent = conversation_history[-max_messages:]
+    lines: List[str] = []
+    for msg in recent:
+        role = msg.get('role', 'user')
+        content = str(msg.get('content', '')).strip()
+        if not content:
+            continue
+        prefix = 'User' if role == 'user' else 'Assistant'
+        lines.append(f"{prefix}: {content}")
+    joined = " \n".join(lines)
+    return joined[:max_chars]
 
 
 

@@ -3,6 +3,7 @@ import os
 import json
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from .agent.config import MODEL_NAME
 from dotenv import load_dotenv
 from .prompt_registry import PromptRegistry
 from .memory.redis_memory_manager import RedisMemoryManager
@@ -33,7 +34,7 @@ class ChatPipeline:
     def _init_llm(self):
         print("🔍 Initializing Language Model...")
         try:
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+            llm = ChatOpenAI(model=MODEL_NAME)
             print("✅ Language Model initialized successfully.")
             return llm
         except Exception as e:
@@ -57,21 +58,34 @@ class ChatPipeline:
             # 3. Engineer the context by combining user facts with documents
             engineered_context = self._engineer_context(user_facts, retrieved_docs)
             
-            # 4. Generate response using enhanced prompt
-            prompt = self.prompt_registry.get(
-                "qa_with_memory",
-                user_facts=engineered_context["user_facts_str"],
-                context=engineered_context["document_context"],
-                question=question
-            )
+            # 4. Determine if this is a product-related query
+            is_product_query = self._is_product_query(question)
             
-            # 5. Generate the answer
+            # 5. Select appropriate prompt based on query type
+            if is_product_query:
+                prompt = self.prompt_registry.get(
+                    "product_recommendation",
+                    user_facts=engineered_context["user_facts_str"],
+                    context=engineered_context["document_context"],
+                    question=question
+                )
+            else:
+                prompt = self.prompt_registry.get(
+                    "qa_with_memory",
+                    user_facts=engineered_context["user_facts_str"],
+                    context=engineered_context["document_context"],
+                    question=question,
+                    conversation="No recent conversation context available."
+                )
+            
+            # 6. Generate the answer
             response = self.llm.invoke(prompt)
             
             return {
                 "answer": response.content, 
                 "user_facts_used": user_facts,
-                "documents_retrieved": len(retrieved_docs)
+                "documents_retrieved": len(retrieved_docs),
+                "query_type": "product_recommendation" if is_product_query else "general_qa"
             }
             
         except Exception as e:
@@ -123,6 +137,34 @@ class ChatPipeline:
             "user_facts_str": user_facts_str,
             "document_context": document_context
         }
+
+    def _is_product_query(self, question: str) -> bool:
+        """Detect if the question is related to product recommendations or Fuxion products."""
+        question_lower = question.lower()
+        
+        # Product-related keywords
+        product_keywords = [
+            'product', 'recommend', 'suggestion', 'help with', 'looking for',
+            'need', 'want', 'trying to', 'goal', 'fitness', 'health', 'wellness',
+            'weight', 'muscle', 'energy', 'immune', 'detox', 'cleanse', 'sleep',
+            'stress', 'digestive', 'joint', 'beauty', 'anti-aging', 'sport',
+            'workout', 'exercise', 'diet', 'nutrition', 'supplement', 'vitamin'
+        ]
+        
+        # Fuxion-specific keywords
+        fuxion_keywords = [
+            'fuxion', 'alpha balance', 'beauty-in', 'berry balance', 'biopro',
+            'café', 'chocolate fit', 'flora liv', 'passion', 'prunex', 'thermo',
+            'vita xtra', 'gano', 'golden flx', 'liquid fiber', 'no stress',
+            'nutraday', 'protein', 'rexet', 'vera', 'vitaenergia', 'xpeed',
+            'xtra mile', 'youth elixir'
+        ]
+        
+        # Check if question contains product-related keywords
+        has_product_keywords = any(keyword in question_lower for keyword in product_keywords)
+        has_fuxion_keywords = any(keyword in question_lower for keyword in fuxion_keywords)
+        
+        return has_product_keywords or has_fuxion_keywords
 
 # Example of how to use the new class
 if __name__ == "__main__":

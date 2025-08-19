@@ -28,6 +28,10 @@ class AgentState(TypedDict):
     command_type: str  # "question", "memory_command", "system"
     question_type: str  # "simple", "complex", "greeting"
     confidence_scores: dict  # fact_id -> confidence_score mapping
+    # Intent understanding
+    intent: str
+    entities: Dict[str, Any]
+    needs_clarification: bool
 
 
 def validate_agent_state(state: Dict[str, Any]) -> bool:
@@ -90,7 +94,10 @@ def create_initial_state(user_id: str, question: str) -> AgentState:
         conversation_history=[],
         command_type="question",
         question_type="complex",
-        confidence_scores={}
+        confidence_scores={},
+        intent="",
+        entities={},
+        needs_clarification=False
     )
 
 

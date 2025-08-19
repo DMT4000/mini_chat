@@ -9,9 +9,11 @@ import re
 import logging
 from typing import Dict, Any, Optional
 from langchain_openai import ChatOpenAI
+from .config import MODEL_NAME, llm_kwargs_for
 from dotenv import load_dotenv
 
 from ..prompt_registry import PromptRegistry
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,12 +48,55 @@ class WorkflowRouter:
     def _init_llm(self) -> ChatOpenAI:
         """Initialize the language model for classification tasks."""
         try:
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+            # Use conditional kwargs to avoid passing temperature to reasoning models
+            llm = ChatOpenAI(**llm_kwargs_for(MODEL_NAME))
             print("✅ Language Model initialized for workflow routing.")
             return llm
         except Exception as e:
             print(f"❌ Error initializing LLM for routing: {e}")
             raise RuntimeError(f"Failed to initialize routing LLM: {str(e)}")
+
+# --- Quick-profile/identity detection helpers ---
+PROFILE_PATTERNS = [
+    r"\bmy name is\s+(?P<name>[A-Za-zÀ-ÿ'.-]{2,40})\b",
+    r"\bcall me\s+(?P<name>[A-Za-zÀ-ÿ'.-]{2,40})\b",
+    r"\bi am\s+(?P<name>[A-Za-zÀ-ÿ'.-]{2,40})\b",
+    r"\bme llamo\s+(?P<name>[A-Za-zÀ-ÿ'.-]{2,40})\b",
+]
+
+ASK_IDENTITY_PATTERNS = [
+    r"\bwhat(?:'s| is) my name\b",
+    r"\bdo you remember my name\b",
+    r"\bcual es mi nombre\b",
+]
+
+
+def detect_profile_info(user_input: str):
+    text = user_input.strip().lower()
+    for p in PROFILE_PATTERNS:
+        m = re.search(p, text)
+        if m:
+            return {"intent": "provide_profile_info", "entities": {"name": m.group("name").strip().title()}}
+    for p in ASK_IDENTITY_PATTERNS:
+        if re.search(p, text):
+            return {"intent": "ask_identity", "entities": {}}
+    return None
+
+# Document-related question patterns (doc visibility / ingestion / retrieval status)
+DOC_QUESTION_PATTERNS = [
+    r"\b(can you|do you) (see|access|read) (my|the) (docs|documents|files|pdfs)\b",
+    r"\b(do you have|did you load|did you ingest) (my|the) (docs|documents|files|pdfs)\b",
+    r"\bhow many (docs|documents|files|pdfs) (do you|did you) (see|load|ingest)\b",
+    r"\bcan you see (\d+) (docs|documents|files|pdfs)\b",
+    r"\bvector|faiss|ingest|index\b",
+]
+
+def is_document_question(user_input: str) -> bool:
+    text = user_input.strip().lower()
+    for p in DOC_QUESTION_PATTERNS:
+        if re.search(p, text):
+            return True
+    return False
     
     def classify_command(self, user_input: str) -> str:
         """
@@ -157,6 +202,64 @@ class WorkflowRouter:
             router_logger.error(f"Error in question complexity classification: {str(e)}")
             # Default to complex on error for safety
             return "complex"
+
+    def detect_intent(self, question: str, user_facts: Dict[str, Any], conversation_context: str = "") -> Dict[str, Any]:
+        """
+        Extract intent, entities, and whether clarification is needed.
+        Returns a dict: {"intent": str, "entities": dict, "needs_clarification": bool}
+        """
+        try:
+            # Quick heuristics first
+            lowered = question.strip().lower()
+            if len(lowered) < 6 or lowered in {"hi", "hello", "hey"}:
+                return {"intent": "greeting", "entities": {}, "needs_clarification": False}
+
+            # Heuristic: fact statements about identity/preferences
+            # e.g., "my name is X", "call me X", "i am X"
+            name_match = re.search(r"\b(my name is|call me)\s+([A-Za-z][A-Za-z\-\s]{1,40})", lowered)
+            if name_match:
+                name_val = name_match.group(2).strip().title()
+                return {"intent": "provide_profile_info", "entities": {"name": name_val}, "needs_clarification": False}
+
+            # LLM-based structured extraction with robust JSON parsing
+            facts_snippet = self._format_user_context(user_facts)
+            prompt = (
+                "You are an intent extraction system. Read the user's question and return STRICT JSON with keys: "
+                "intent (string), entities (object), needs_clarification (boolean). If unsure, set needs_clarification true.\n\n"
+                f"User facts: {facts_snippet}\n"
+                f"Recent: {conversation_context[:400]}\n"
+                f"Question: {question}\n\n"
+                "Return ONLY JSON."
+            )
+            response = self.llm.invoke(prompt)
+            raw = response.content
+            data = self._safe_json_extract(raw)
+            if not isinstance(data, dict):
+                raise ValueError("Intent JSON not a dict")
+            intent = str(data.get("intent", "unknown")).strip().lower()
+            entities = data.get("entities", {}) or {}
+            needs = bool(data.get("needs_clarification", False))
+            return {"intent": intent, "entities": entities, "needs_clarification": needs}
+        except Exception as e:
+            self.routing_metrics['routing_errors'] += 1
+            router_logger.error(f"Error in intent detection: {str(e)}")
+            # Safe fallback
+            return {"intent": "unknown", "entities": {}, "needs_clarification": False}
+
+    def _safe_json_extract(self, text: str) -> Any:
+        """Extract first JSON object from text robustly."""
+        try:
+            # Fast path: direct parse
+            return json.loads(text)
+        except Exception:
+            pass
+        try:
+            import re
+            m = re.search(r"\{[\s\S]*\}", text)
+            if m:
+                return json.loads(m.group(0))
+        except Exception:
+            return {}
     
     def _quick_classify_question(self, question: str) -> Optional[str]:
         """

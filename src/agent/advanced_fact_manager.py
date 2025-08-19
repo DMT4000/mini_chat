@@ -34,7 +34,12 @@ class AdvancedFactManager:
     def _init_llm(self) -> ChatOpenAI:
         """Initialize the language model for fact management operations."""
         try:
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)  # Low temperature for consistency
+            # Keep a low temperature for non-reasoning text model; fall back to env-configured if provided
+            model_name = os.getenv("FACT_MANAGER_MODEL", "gpt-4o-mini")
+            if model_name in {"o3", "o3-mini", "gpt-5-mini", "o4-mini-high"}:
+                llm = ChatOpenAI(model=model_name)
+            else:
+                llm = ChatOpenAI(model=model_name, temperature=0.1)
             print("✅ Language Model initialized for Advanced Fact Manager.")
             return llm
         except Exception as e:
@@ -42,7 +47,8 @@ class AdvancedFactManager:
             raise RuntimeError(f"Failed to initialize LLM: {str(e)}")
     
     def merge_facts_intelligently(self, existing_facts: Dict[str, Any], 
-                                new_facts: Dict[str, Any]) -> Dict[str, Any]:
+                                new_facts: Dict[str, Any],
+                                confidence_scores: Dict[str, float] | None = None) -> Dict[str, Any]:
         """
         Merge new facts with existing facts using LLM-powered intelligent reasoning.
         
@@ -75,6 +81,19 @@ class AdvancedFactManager:
                 print("✅ No new facts to merge - returning existing facts")
                 return existing_facts.copy()
             
+            # If we have confidence scores, prevent low-confidence overwrites for identity keys
+            if confidence_scores:
+                protected_keys = {"name", "full_name", "user_name"}
+                adjusted_new_facts = {}
+                for key, value in new_facts.items():
+                    if key in protected_keys and key in existing_facts:
+                        new_conf = confidence_scores.get(key, 0.0)
+                        # Require high confidence to override identity
+                        if new_conf < 0.85:
+                            continue  # skip overwrite
+                    adjusted_new_facts[key] = value
+                new_facts = adjusted_new_facts
+
             # Detect potential conflicts before merging
             conflicts = self.detect_fact_conflicts(existing_facts, new_facts)
             
@@ -200,6 +219,8 @@ class AdvancedFactManager:
                 merged[key] = new_value
         
         return merged
+
+    # (helper removed; logic handled inline in merge_facts_intelligently)
     
     def _fallback_merge(self, existing_facts: Dict[str, Any], 
                        new_facts: Dict[str, Any]) -> Dict[str, Any]:

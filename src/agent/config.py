@@ -1,44 +1,17 @@
-"""
-LangGraph configuration and imports for the AI Co-founder agent.
+import os
 
-This module centralizes LangGraph imports and provides basic configuration
-for the agent workflow.
-"""
+# Centralized LLM model selection
+# Use a safer default non-reasoning chat model to avoid temperature errors
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
-from typing import Dict, Any
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolExecutor
-from langchain_core.messages import BaseMessage
+# Models that do not accept temperature or certain params (reasoning families)
+REASONING_MODELS = {"o3", "o3-mini", "gpt-5-mini", "o4-mini-high"}
 
-# LangGraph workflow configuration
-WORKFLOW_CONFIG = {
-    "max_iterations": 10,
-    "recursion_limit": 50,
-    "debug": True
-}
 
-# Node names for the agent workflow
-class NodeNames:
-    RETRIEVE_CONTEXT = "retrieve_context"
-    GENERATE_ANSWER = "generate_answer"
-    EXTRACT_FACTS = "extract_facts"
-    SAVE_FACTS = "save_facts"
-
-# Edge names for workflow transitions
-class EdgeNames:
-    START = "start"
-    END = "end"
-    CONTINUE = "continue"
-
-def create_workflow_graph() -> StateGraph:
-    """
-    Create and return a basic StateGraph instance for the agent workflow.
-    
-    Returns:
-        StateGraph: Configured StateGraph instance
-    """
-    from .agent_state import AgentState
-    
-    workflow = StateGraph(AgentState)
-    return workflow
+def llm_kwargs_for(model: str):
+    """Return keyword args for ChatOpenAI respecting reasoning models' constraints."""
+    if model in REASONING_MODELS:
+        # Do not pass temperature to reasoning models
+        return {"model": model}
+    # Default small temperature for non-reasoning text models
+    return {"model": model, "temperature": 0.2}

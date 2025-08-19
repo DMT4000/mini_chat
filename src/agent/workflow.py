@@ -72,6 +72,10 @@ class AgentWorkflow:
             workflow.add_node("classify_input", self._wrap_node_with_error_handling(
                 self._classify_input_node, "classify_input"
             ))
+            # New: clarification node for ambiguous queries
+            workflow.add_node("clarify_question", self._wrap_node_with_error_handling(
+                self._clarify_question_node, "clarify_question"
+            ))
             workflow.add_node("memory_command", self._wrap_node_with_error_handling(
                 self._memory_command_node, "memory_command"
             ))
@@ -108,6 +112,7 @@ class AgentWorkflow:
                 {
                     "memory_command": "memory_command",
                     "lightweight": "lightweight_response",
+                    "clarify": "clarify_question",
                     "full_workflow": "retrieve_context"
                 }
             )
@@ -115,6 +120,7 @@ class AgentWorkflow:
             # Memory command and lightweight paths go directly to end
             workflow.add_edge("memory_command", END)
             workflow.add_edge("lightweight_response", END)
+            workflow.add_edge("clarify_question", END)
             
             # Full workflow path
             workflow.add_edge("retrieve_context", "generate_answer")
@@ -600,16 +606,42 @@ class AgentWorkflow:
         try:
             # Classify the command type
             command_type = self.router.classify_command(state['question'])
-            
+
+            # Try quick profile/identity detection first
+            try:
+                from .workflow_router import detect_profile_info
+                quick_det = detect_profile_info(state['question'])
+            except Exception:
+                quick_det = None
+
             # Classify question complexity for routing
             question_type = self.router.classify_question_complexity(
                 state['question'], 
                 state.get('user_facts', {})
             )
-            
+
+            # Detect intent/entities and whether we should clarify
+            conversation_summary = ""
+            try:
+                from .workflow_nodes import _summarize_recent_conversation
+                conversation_summary = _summarize_recent_conversation(state.get('conversation_history', []), max_messages=6, max_chars=400)
+            except Exception:
+                pass
+
+            # Use quick detection result if available; otherwise run LLM intent detection
+            if quick_det:
+                intent_info = {"intent": quick_det.get("intent", "unknown"), "entities": quick_det.get("entities", {}), "needs_clarification": False}
+                # Treat as simple to avoid over-routing; downstream routing will handle exact path
+                question_type = 'simple'
+            else:
+                intent_info = self.router.detect_intent(state['question'], state.get('user_facts', {}), conversation_summary)
+
             # Update state with classification results
             updated_state = update_state_field(state, 'command_type', command_type)
             updated_state = update_state_field(updated_state, 'question_type', question_type)
+            updated_state = update_state_field(updated_state, 'intent', intent_info.get('intent', 'unknown'))
+            updated_state = update_state_field(updated_state, 'entities', intent_info.get('entities', {}))
+            updated_state = update_state_field(updated_state, 'needs_clarification', bool(intent_info.get('needs_clarification', False)))
             
             print(f"🎯 Input classified - Command: {command_type}, Question: {question_type}")
             
@@ -655,18 +687,67 @@ class AgentWorkflow:
                 print(f"🚀 Routing to memory command processor")
                 return "memory_command"
             
+            # Ensure identity/profile go through context retrieval to load/save memory
+            elif state.get('intent') in ('provide_profile_info', 'ask_identity'):
+                print("Routing to full workflow for identity/profile handling")
+                return "retrieve_context"
+            # Force document questions through full workflow to ground responses in retrieval
+            elif self._is_document_question(state):
+                print("Routing to full workflow for document-related question")
+                return "full_workflow"
             # Route simple questions and greetings to lightweight response
+            elif state.get('needs_clarification'):
+                print(f"🚦 Routing to clarification step due to ambiguity")
+                return "clarify"
+            # If user is providing profile info (e.g., name), prefer full workflow to enable fact extraction
+            elif state.get('intent') == 'provide_profile_info':
+                print("Routing to full workflow for profile info extraction")
+                return "full_workflow"
             elif question_type in ['simple', 'greeting']:
                 print(f"🚀 Routing to lightweight path for {question_type} question")
                 return "lightweight"
             else:
                 print(f"🚀 Routing to full workflow for {question_type} question")
                 return "full_workflow"
-                
         except Exception as e:
             print(f"❌ Error in routing decision: {str(e)}")
             # Default to full workflow on error
             return "full_workflow"
+
+    def _is_document_question(self, state: AgentState) -> bool:
+        """Heuristic: decide if the user is asking about docs/ingest/vector index; if so, require retrieval path."""
+        try:
+            from .workflow_router import is_document_question
+            return is_document_question(state.get('question', ''))
+        except Exception:
+            return False
+
+    def _clarify_question_node(self, state: AgentState) -> AgentState:
+        """
+        Ask a short, targeted clarification question when the user's intent is ambiguous.
+        """
+        try:
+            intent = state.get('intent', 'unknown')
+            entities = state.get('entities', {})
+            base = "I want to make sure I help precisely. "
+            if intent == 'greeting':
+                answer = "Hello! How can I assist you with your business today?"
+            else:
+                # Generate a concise clarification prompt heuristically
+                missing = []
+                if 'jurisdiction' not in entities and any(k in state.get('question','').lower() for k in ['llc','register','incorporate','license']):
+                    missing.append('state or country')
+                if 'business_type' not in entities and 'llc' not in entities:
+                    missing.append('business type (e.g., LLC, corporation)')
+                if 'timeline' not in entities and any(k in state.get('question','').lower() for k in ['deadline','when','timeline']):
+                    missing.append('timeline')
+                if missing:
+                    answer = base + "Could you specify your " + ", ".join(missing) + "?"
+                else:
+                    answer = base + "Could you share a bit more detail on your goal so I can tailor the guidance?"
+            return update_state_field(state, 'answer', answer)
+        except Exception as e:
+            return update_state_field(state, 'answer', "Could you share a bit more detail so I can tailor the guidance?")
     
     def _route_after_answer_generation(self, state: AgentState) -> str:
         """
