@@ -57,6 +57,78 @@ The `api.py` script creates a FastAPI server that exposes a `/chat` endpoint for
 
 4. **Open the chat interface**: Open a web browser and go to `http://localhost:8000` to open the chat interface.
 
+## Feature Flags and Safe Development
+
+This project includes a feature flag system to safely test experimental changes without breaking the stable demo.
+
+### Running in Different Modes
+
+**Stable Mode (Default):**
+```bash
+EXPERIMENTAL=0 python -m uvicorn src.api:app --reload --port 8000
+# or simply:
+python -m uvicorn src.api:app --reload --port 8000
+```
+
+**Experimental Mode:**
+```bash
+EXPERIMENTAL=1 python -m uvicorn src.api:app --reload --port 8000
+```
+
+### Using Make Commands
+
+The project includes a Makefile with convenient shortcuts:
+
+```bash
+# Start in stable mode
+make start:stable
+
+# Start in experimental mode  
+make start:exp
+
+# Run smoke test against stable app
+make smoke
+
+# Run smoke test against experimental app
+make smoke:exp
+
+# Show all available commands
+make help
+```
+
+### Smoke Testing
+
+Run smoke tests to verify the app is working correctly:
+
+**Bash (Linux/macOS):**
+```bash
+./scripts/smoke.sh
+```
+
+**PowerShell (Windows):**
+```powershell
+.\scripts\smoke.ps1
+```
+
+**Using Make:**
+```bash
+make smoke        # Test stable mode
+make smoke:exp    # Test experimental mode
+```
+
+The smoke test:
+- Waits for the app to start
+- Checks the `/health` endpoint
+- Tests the root endpoint
+- Reports success/failure
+
+### Development Workflow
+
+1. **Keep demo stable**: Always run in stable mode for demos
+2. **Test experimental**: Use `EXPERIMENTAL=1` for testing new features
+3. **Verify with smoke**: Run smoke tests before and after changes
+4. **Toggle safely**: Switch between modes without restarting
+
 ## Tool Usage
 
 - **`langchain`**: This project uses the `langchain` library to create the FAISS index and to interact with the OpenAI API.

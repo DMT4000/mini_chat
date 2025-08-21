@@ -1,0 +1,26 @@
+{
+  "john_doe": {
+    "memory_file": "user_memory\\user_john_doe_memory.json",
+    "created_at": "2025-08-20T18:58:53.609224",
+    "updated_at": "2025-08-20T18:58:53.609319",
+    "fact_count": 5
+  },
+  "sarah_smith": {
+    "memory_file": "user_memory\\user_sarah_smith_memory.json",
+    "created_at": "2025-08-20T18:58:53.775480",
+    "updated_at": "2025-08-20T18:58:53.775522",
+    "fact_count": 7
+  },
+  "test_user_123": {
+    "memory_file": "user_memory\\user_test_user_123_memory.json",
+    "created_at": "2025-08-20T18:59:07.881088",
+    "updated_at": "2025-08-20T18:59:07.881108",
+    "fact_count": 4
+  },
+  "persistence_test_user": {
+    "memory_file": "user_memory\\user_persistence_test_user_memory.json",
+    "created_at": "2025-08-20T18:59:17.489478",
+    "updated_at": "2025-08-20T18:59:17.489494",
+    "fact_count": 3
+  }
+}

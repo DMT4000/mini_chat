@@ -4,6 +4,10 @@ from .agent.agent import Agent, create_agent
 from typing import Optional
 import json
 import re
+import os
+
+# Feature flag for experimental changes
+EXPERIMENTAL = os.getenv("EXPERIMENTAL") == "1"
 
 # Initialize the agent lazily
 agent = None
@@ -12,8 +16,22 @@ def get_agent():
     """Get or initialize the agent."""
     global agent
     if agent is None:
-        agent = create_agent(enable_debug_logging=True)
+        if EXPERIMENTAL:
+            agent = create_experimental_agent()
+        else:
+            agent = create_stable_agent()
     return agent
+
+def create_stable_agent():
+    """Create the stable, production-ready agent."""
+    print("🟢 Using STABLE agent path")
+    return create_agent(enable_debug_logging=True)
+
+def create_experimental_agent():
+    """Create the experimental agent with new features."""
+    print("🔴 Using EXPERIMENTAL agent path")
+    # For now, this is the same as stable, but can be modified for new features
+    return create_agent(enable_debug_logging=True)
 
 app = FastAPI()
 
@@ -26,6 +44,15 @@ async def startup_event():
     print("Environment variables loaded.")
     # Initialize the agent after loading env vars
     get_agent()
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for smoke testing."""
+    return {
+        "status": "healthy",
+        "experimental": EXPERIMENTAL,
+        "timestamp": "2025-08-20T00:00:00Z"
+    }
 
 @app.get("/app.js")
 def serve_app_js():
@@ -305,9 +332,9 @@ def update_user_memory(user_id: str, memory_data: dict):
         
         print(f"Updating memory for user: {validated_user_id}")
         
-        # Update user memory in Redis using memory manager directly
-        from .memory.redis_memory_manager import RedisMemoryManager
-        memory_manager = RedisMemoryManager()
+        # Update user memory using local memory manager directly
+        from .memory.local_memory_manager import LocalMemoryManager
+        memory_manager = LocalMemoryManager()
         memory_manager.update_user_memory(validated_user_id, memory_data)
         
         print(f"Memory updated successfully for user {validated_user_id}")
@@ -455,6 +482,50 @@ async def chat_interface():
           .input { @apply flex h-10 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-500 focus:border-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:ring-zinc-400 dark:focus:border-zinc-400 text-zinc-900 dark:text-zinc-100 placeholder-zinc-500 dark:placeholder-zinc-400; }
           .badge { @apply inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium; }
           .scrollbar-thin { scrollbar-width: thin; }
+          
+          /* Enhanced message styling */
+          .chat-message-content {
+            line-height: 1.6;
+            word-wrap: break-word;
+          }
+          
+          .chat-message-content ul, .chat-message-content ol {
+            margin: 0.5rem 0;
+            padding-left: 1.5rem;
+          }
+          
+          .chat-message-content li {
+            margin: 0.25rem 0;
+          }
+          
+          .chat-message-content strong {
+            font-weight: 600;
+            color: inherit;
+          }
+          
+          .chat-message-content .product-name {
+            font-weight: 600;
+            color: #1f2937;
+            background: #f3f4f6;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            display: inline-block;
+            margin: 0.25rem 0;
+          }
+          
+          .dark .chat-message-content .product-name {
+            color: #e5e7eb;
+            background: #374151;
+          }
+          
+          .chat-message-content .italic {
+            font-style: italic;
+            color: #6b7280;
+          }
+          
+          .dark .chat-message-content .italic {
+            color: #9ca3af;
+          }
         </style>
     </head>
       <body class=\"h-screen w-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50\">
@@ -850,12 +921,154 @@ async def chat_interface():
               const row = document.createElement('div');
               row.className = `flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`;
               const bubble = document.createElement('div');
-              bubble.className = `max-w-[80%] rounded-lg px-3 py-2 text-sm ${m.role === 'user' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800'}`;
-              bubble.textContent = m.content;
+              bubble.className = `max-w-[80%] rounded-lg px-4 py-3 text-sm ${m.role === 'user' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800'}`;
+              
+              if (m.role === 'assistant') {
+                // Parse and format structured content for assistant messages
+                bubble.innerHTML = formatStructuredMessage(m.content);
+                bubble.classList.add('chat-message-content');
+              } else {
+                bubble.textContent = m.content;
+              }
+              
               row.appendChild(bubble);
               chatMessages.appendChild(row);
             }
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+
+          function formatStructuredMessage(content) {
+            if (!content) return '';
+            
+            // Split content into lines and process each line
+            const lines = content.split('\n');
+            let html = '';
+            let inList = false;
+            let listType = '';
+            
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i].trim();
+              if (!line) {
+                // Empty line - close any open lists and add spacing
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                html += '<div class="mb-3"></div>';
+                continue;
+              }
+              
+              // Check for headers (## or ###)
+              if (line.startsWith('## ')) {
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                html += `<div class="font-semibold text-base mb-3 text-zinc-800 dark:text-zinc-200 border-b border-zinc-200 dark:border-zinc-700 pb-1">${escapeHtml(line.substring(3))}</div>`;
+                continue;
+              }
+              
+              if (line.startsWith('### ')) {
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                html += `<div class="font-medium text-sm mb-2 text-zinc-700 dark:text-zinc-300">${escapeHtml(line.substring(4))}</div>`;
+                continue;
+              }
+              
+              // Check for numbered lists (1. 2. etc.)
+              if (/^[0-9]+\\.\\s/.test(line)) {
+                if (!inList || listType !== 'ol') {
+                  if (inList) html += `</${listType}>`;
+                  html += '<ol class="list-decimal ml-4 mb-3 space-y-1">';
+                  inList = true;
+                  listType = 'ol';
+                }
+                html += `<li class="text-sm leading-relaxed">${escapeHtml(line.replace(/^[0-9]+\\.\\s/, ''))}</li>`;
+                continue;
+              }
+              
+              // Check for bullet points (- or *)
+              if (line.startsWith('- ') || line.startsWith('* ')) {
+                if (!inList || listType !== 'ul') {
+                  if (inList) html += `</${listType}>`;
+                  html += '<ul class="list-disc ml-4 mb-3 space-y-1">';
+                  inList = true;
+                  listType = 'ul';
+                }
+                html += `<li class="text-sm leading-relaxed">${escapeHtml(line.substring(2))}</li>`;
+                continue;
+              }
+              
+              // Check for bold text (**text**)
+              if (line.includes('**') && line.split('**').length > 2) {
+                const formattedLine = line.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                html += `<div class="mb-2 text-sm leading-relaxed"><strong>${escapeHtml(line.replace(/\\*\\*(.*?)\\*\\*/g, '$1'))}</strong></div>`;
+                continue;
+              }
+              
+              // Check for product recommendations with SKU format
+              if (line.includes('SKU:') || line.includes('SKU :')) {
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                // Highlight SKU information
+                const formattedLine = line.replace(/(SKU:?\\s*[0-9]+)/g, '<span class="font-mono text-xs bg-zinc-200 dark:bg-zinc-700 px-1 py-0.5 rounded">$1</span>');
+                html += `<div class="mb-2 text-sm leading-relaxed">${escapeHtml(formattedLine)}</div>`;
+                continue;
+              }
+              
+              // Check for key phrases in brackets [phrase]
+              if (line.includes('[') && line.includes(']')) {
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                const formattedLine = line.replace(/\\[(.*?)\\]/g, '<span class="font-medium text-zinc-600 dark:text-zinc-400">[$1]</span>');
+                html += `<div class="mb-2 text-sm leading-relaxed">${escapeHtml(formattedLine)}</div>`;
+                continue;
+              }
+              
+              // Check for product names (all caps words)
+              if (/^[A-Z\\s&]+$/.test(line) && line.length > 3 && line.length < 50) {
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                html += `<div class="mb-2 text-sm product-name">${escapeHtml(line)}</div>`;
+                continue;
+              }
+              
+              // Check for emphasis (italic text with _text_)
+              if (line.includes('_') && line.split('_').length > 2) {
+                if (inList) {
+                  html += `</${listType}>`;
+                  inList = false;
+                }
+                html += `<div class="mb-2 text-sm leading-relaxed italic">${escapeHtml(line.replace(/_(.*?)_/g, '$1'))}</div>`;
+                continue;
+              }
+              
+              // Regular text line
+              if (inList) {
+                html += `</${listType}>`;
+                inList = false;
+              }
+              html += `<div class="mb-2 text-sm leading-relaxed">${escapeHtml(line)}</div>`;
+            }
+            
+            // Close any remaining open list
+            if (inList) {
+              html += `</${listType}>`;
+            }
+            
+            return html;
           }
 
           function appendMessage(role, content) {

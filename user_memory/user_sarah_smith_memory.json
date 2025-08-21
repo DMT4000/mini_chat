@@ -1,0 +1,23 @@
+{
+  "user_id": "sarah_smith",
+  "facts": {
+    "name": "Sarah Smith",
+    "age": 28,
+    "occupation": "Marketing Manager",
+    "interests": [
+      "yoga",
+      "cooking",
+      "travel"
+    ],
+    "preferences": {
+      "communication_style": "friendly",
+      "detail_level": "simple",
+      "response_format": "bullet_points"
+    },
+    "location": "New York",
+    "favorite_color": "blue"
+  },
+  "created_at": "2025-08-20T18:58:53.775480",
+  "updated_at": "2025-08-20T18:58:53.775522",
+  "version": "1.0"
+}

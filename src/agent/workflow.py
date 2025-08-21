@@ -681,6 +681,7 @@ class AgentWorkflow:
         try:
             command_type = state.get('command_type', 'question')
             question_type = state.get('question_type', 'complex')
+            question = state.get('question', '').lower()
             
             # Route memory commands to memory command processor
             if command_type == 'memory_command':
@@ -691,18 +692,42 @@ class AgentWorkflow:
             elif state.get('intent') in ('provide_profile_info', 'ask_identity'):
                 print("Routing to full workflow for identity/profile handling")
                 return "retrieve_context"
+            
+            # Route product recommendations through full workflow to access Fuxion products
+            elif state.get('intent') == 'product_recommendation':
+                print("🚀 Routing to full workflow for product recommendation")
+                return "full_workflow"
+            
+            # Force capabilities and functionality questions through full workflow
+            elif self._is_capabilities_question(state):
+                print("🎯 Routing to full workflow for capabilities question")
+                return "full_workflow"
+            
             # Force document questions through full workflow to ground responses in retrieval
             elif self._is_document_question(state):
-                print("Routing to full workflow for document-related question")
+                print("📚 Routing to full workflow for document-related question")
                 return "full_workflow"
+            
+            # Force wellness app and cronograma related questions through full workflow
+            elif self._is_wellness_or_cronograma_question(state):
+                print("📋 Routing to full workflow for wellness app/cronograma question")
+                return "full_workflow"
+            
+            # Force Fuxion product related questions through full workflow
+            elif self._is_fuxion_product_question(state):
+                print("🛍️ Routing to full workflow for Fuxion product question")
+                return "full_workflow"
+            
             # Route simple questions and greetings to lightweight response
             elif state.get('needs_clarification'):
                 print(f"🚦 Routing to clarification step due to ambiguity")
                 return "clarify"
+            
             # If user is providing profile info (e.g., name), prefer full workflow to enable fact extraction
             elif state.get('intent') == 'provide_profile_info':
                 print("Routing to full workflow for profile info extraction")
-                return "full_workflow"
+                return "retrieve_context"
+            
             elif question_type in ['simple', 'greeting']:
                 print(f"🚀 Routing to lightweight path for {question_type} question")
                 return "lightweight"
@@ -722,6 +747,122 @@ class AgentWorkflow:
         except Exception:
             return False
 
+    def _is_wellness_or_cronograma_question(self, state: AgentState) -> bool:
+        """Check if the question is related to wellness app or cronograma documents."""
+        try:
+            question = state.get('question', '').lower()
+            
+            # Wellness app related keywords
+            wellness_keywords = [
+                'wellness', 'wellness app', 'wellness application', 'plan de trabajo',
+                'workstream', 'work stream', 'ws', 'objetivo', 'objective', 'goal',
+                'implementación', 'implementation', 'development', 'fase', 'phase',
+                'milestone', 'hito', 'deliverable'
+            ]
+            
+            # Cronograma/timeline related keywords
+            cronograma_keywords = [
+                'cronograma', 'timeline', 'schedule', 'calendar', 'project timeline',
+                'project schedule', 'gate', 'gateway', 'checkpoint', 'deadline',
+                'due date', 'target date', 'roadmap', 'project plan'
+            ]
+            
+            # Check for wellness app keywords
+            for keyword in wellness_keywords:
+                if keyword in question:
+                    print(f"🎯 Wellness app keyword detected: {keyword}")
+                    return True
+            
+            # Check for cronograma keywords
+            for keyword in cronograma_keywords:
+                if keyword in question:
+                    print(f"🎯 Cronograma keyword detected: {keyword}")
+                    return True
+            
+            return False
+        except Exception as e:
+            print(f"⚠️ Error checking wellness/cronograma keywords: {e}")
+            return False
+
+    def _is_fuxion_product_question(self, state: AgentState) -> bool:
+        """Check if the question is related to Fuxion products."""
+        try:
+            question = state.get('question', '').lower()
+            
+            # Fuxion product related keywords in both English and Spanish
+            fuxion_keywords = [
+                # English keywords
+                'fuxion', 'product', 'products', 'supplement', 'supplements', 'catalog',
+                'sku', 'weight loss', 'nutrition', 'health', 'wellness',
+                
+                # Spanish keywords
+                'producto', 'productos', 'suplemento', 'suplementos', 'catálogo',
+                'pérdida de peso', 'nutrición', 'salud', 'bienestar',
+                
+                # Common product terms
+                'café', 'chocolate', 'vitamin', 'vitamina', 'mineral', 'proteína'
+            ]
+            
+            # Check for Fuxion product keywords
+            for keyword in fuxion_keywords:
+                if keyword in question:
+                    print(f"🎯 Fuxion product keyword detected: {keyword}")
+                    return True
+            
+            return False
+        except Exception as e:
+            print(f"⚠️ Error checking Fuxion product keywords: {e}")
+            return False
+
+    def _is_capabilities_question(self, state: AgentState) -> bool:
+        """Check if the question is asking about the agent's capabilities or functionality."""
+        try:
+            question = state.get('question', '').lower()
+            
+            # Capabilities and functionality question patterns
+            capabilities_patterns = [
+                # Direct capability questions
+                r'\b(what are|what is|tell me about|explain) (your|the) (capabilities|abilities|features|functions|skills)\b',
+                r'\b(what can|what do) you (do|help with|assist with|support)\b',
+                r'\b(how do|how can) you (help|assist|support|work)\b',
+                r'\b(what is|what does) this (agent|assistant|system|tool) (do|help with)\b',
+                r'\b(can you|do you) (help|assist|support|work) (with|on)\b',
+                
+                # Document access questions
+                r'\b(what|which) (documents|docs|files|plans|products) (can|do) you (see|access|read|know about)\b',
+                r'\b(do you|can you) (see|access|read|know about) (my|the) (documents|docs|files)\b',
+                r'\b(what|which) (files|documents|plans|products) (are|do) you (aware of|familiar with)\b',
+                
+                # General functionality questions
+                r'\b(what|how) (does|can|will) this (work|function|operate)\b',
+                r'\b(explain|describe) (how|what) (this|you) (works|does|functions)\b',
+                r'\b(what|which) (features|capabilities|functions) (are|do) (available|you have)\b'
+            ]
+            
+            # Check for capabilities question patterns
+            import re
+            for pattern in capabilities_patterns:
+                if re.search(pattern, question):
+                    print(f"🎯 Capabilities question detected: {pattern}")
+                    return True
+            
+            # Also check for common capability question keywords
+            capability_keywords = [
+                'capabilities', 'abilities', 'features', 'functions', 'skills',
+                'what can you do', 'how do you work', 'what do you help with',
+                'what documents', 'what files', 'what plans', 'what products'
+            ]
+            
+            for keyword in capability_keywords:
+                if keyword in question:
+                    print(f"🎯 Capabilities keyword detected: {keyword}")
+                    return True
+            
+            return False
+        except Exception as e:
+            print(f"⚠️ Error checking capabilities keywords: {e}")
+            return False
+    
     def _clarify_question_node(self, state: AgentState) -> AgentState:
         """
         Ask a short, targeted clarification question when the user's intent is ambiguous.

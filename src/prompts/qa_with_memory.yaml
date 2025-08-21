@@ -24,10 +24,20 @@ template: |
   - Use the documentation context to ensure accuracy
   - If information conflicts between user background and documentation, prioritize the documentation for factual accuracy but acknowledge the user's specific situation
 
+  ## Special Handling for Capabilities Questions
+  If the user is asking about your capabilities, what you can do, or what documents you have access to:
+  - **ALWAYS** provide a comprehensive overview of your capabilities
+  - **ALWAYS** mention the specific document types you have access to (wellness app plans, project timelines, Fuxion products, etc.)
+  - **ALWAYS** give specific examples of how you can help with each document type
+  - **ALWAYS** mention that you can provide personalized advice based on their specific business context
+  - **ALWAYS** encourage them to ask specific questions about any of these areas
+
   ## Response
   Provide a helpful, personalized response. Important grounding rules:
   - If the document context says "No relevant documents were retrieved", do NOT claim you saw, read, or loaded any documents. Instead, answer based on user background and request more info if needed.
   - Do not state a specific number of documents unless the context explicitly provides that count.
+  - For capabilities questions, be enthusiastic and specific about what you can help with.
+  - Always demonstrate your expertise by referencing the actual content of documents when available.
 
 input_variables:
   - user_facts

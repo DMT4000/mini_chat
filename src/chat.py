@@ -6,7 +6,7 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from .agent.config import MODEL_NAME
 from dotenv import load_dotenv
 from .prompt_registry import PromptRegistry
-from .memory.redis_memory_manager import RedisMemoryManager
+from .memory.local_memory_manager import LocalMemoryManager
 
 class ChatPipeline:
     def __init__(self, memory_manager=None):
@@ -14,7 +14,7 @@ class ChatPipeline:
         self.retriever = self._init_retriever()
         self.llm = self._init_llm()
         self.prompt_registry = PromptRegistry()
-        self.memory_manager = memory_manager or RedisMemoryManager()
+        self.memory_manager = memory_manager or LocalMemoryManager()
 
     def _init_retriever(self):
         print("🔍 Initializing FAISS index...")
@@ -102,14 +102,181 @@ class ChatPipeline:
             return {}
 
     def _retrieve_documents(self, question: str) -> list:
-        """Retrieve relevant documents from FAISS vector store."""
+        """Retrieve relevant documents from FAISS vector store with improved prioritization."""
         try:
-            if self.retriever:
-                return self.retriever.get_relevant_documents(question)
-            return []
+            if not self.retriever:
+                return []
+            
+            # Check if this is a product-related query
+            is_product_query = self._is_product_query(question)
+            
+            # Check if this is a project/planning query
+            is_project_query = any(keyword in question.lower() for keyword in 
+                ['timeline', 'schedule', 'cronograma', 'plan', 'workstream', 'ws', 'fase', 'gate', 
+                 'milestone', 'deliverable', 'project', 'development', 'implementation', 'roadmap', 'phase'])
+            
+            if is_product_query:
+                # For product queries, use product prioritization
+                print(f"🔍 Product query detected: '{question}' - Using product prioritization...")
+                
+                # Stage 1: Get more documents initially to have a larger pool
+                initial_docs = self.retriever.get_relevant_documents(question, k=10)
+                
+                # Stage 2: Re-rank and prioritize Fuxion Products and product-related content
+                prioritized_docs = self._prioritize_product_documents(initial_docs, question)
+                
+                # Return top 5 prioritized documents
+                return prioritized_docs[:5]
+                
+            elif is_project_query:
+                # For project/planning queries, use complex document prioritization
+                print(f"🔍 Project/planning query detected: '{question}' - Using complex document prioritization...")
+                
+                # Stage 1: Get more documents initially to have a larger pool
+                initial_docs = self.retriever.get_relevant_documents(question, k=10)
+                
+                # Stage 2: Re-rank and prioritize complex documents (cronograma, wellness app plan)
+                prioritized_docs = self._prioritize_complex_documents(initial_docs, question)
+                
+                # Return top 5 prioritized documents
+                return prioritized_docs[:5]
+                
+            else:
+                # For general queries, use standard retrieval
+                print(f"🔍 General query detected: '{question}' - Using standard retrieval...")
+                return self.retriever.get_relevant_documents(question, k=4)
+                
         except Exception as e:
             print(f"⚠️ Warning: Could not retrieve documents: {e}")
             return []
+
+    def _prioritize_product_documents(self, docs: list, question: str) -> list:
+        """Prioritize Fuxion Products and other product-related documents for better relevance."""
+        if not docs:
+            return []
+        
+        # Define priority scores for different document types
+        prioritized_docs = []
+        
+        for doc in docs:
+            score = 0
+            source = doc.metadata.get('source', '').lower()
+            content = doc.page_content.lower()
+            question_lower = question.lower()
+            
+            # High priority: Fuxion Products document
+            if 'fuxion products' in source:
+                score += 100
+            
+            # High priority: Documents containing product information
+            if any(keyword in content for keyword in ['sku', 'product', 'supplement', 'vitamin', 'protein']):
+                score += 50
+            
+            # Medium priority: Documents mentioning Fuxion
+            if 'fuxion' in content:
+                score += 30
+            
+            # Medium priority: Documents with product names
+            product_names = [
+                'alpha balance', 'beauty-in', 'berry balance', 'biopro', 'café', 
+                'chocolate fit', 'flora liv', 'passion', 'prunex', 'thermo',
+                'vita xtra', 'gano', 'golden flx', 'liquid fiber', 'no stress',
+                'nutraday', 'protein', 'rexet', 'vera', 'vitaenergia', 'xpeed',
+                'xtra mile', 'youth elixir'
+            ]
+            
+            for product_name in product_names:
+                if product_name in content:
+                    score += 25
+                    break
+            
+            # Lower priority: General wellness/health documents
+            if any(keyword in content for keyword in ['wellness', 'health', 'fitness', 'app']):
+                score += 10
+            
+            # Query relevance bonus
+            if any(word in content for word in question_lower.split()):
+                score += 5
+            
+            # Store the score in metadata for debugging
+            doc.metadata['priority_score'] = score
+            prioritized_docs.append((doc, score))
+        
+        # Sort by priority score (highest first)
+        prioritized_docs.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return just the documents (without scores)
+        result_docs = [doc for doc, score in prioritized_docs]
+        
+        # Debug logging
+        print(f"📊 Document prioritization for '{question}':")
+        for i, (doc, score) in enumerate(prioritized_docs[:5]):
+            source = doc.metadata.get('source', 'Unknown')
+            print(f"  {i+1}. {source} (score: {score})")
+        
+        return result_docs
+
+    def _prioritize_complex_documents(self, docs: list, question: str) -> list:
+        """Prioritize complex documents (cronograma, wellness app plan) for project/planning queries."""
+        if not docs:
+            return []
+        
+        # Define priority scores for different document types
+        prioritized_docs = []
+        
+        for doc in docs:
+            score = 0
+            source = doc.metadata.get('source', '').lower()
+            content = doc.page_content.lower()
+            question_lower = question.lower()
+            
+            # High priority: Cronograma document for timeline/schedule queries
+            if 'cronograma' in source and any(keyword in question_lower for keyword in 
+                ['timeline', 'schedule', 'cronograma', 'fase', 'gate', 'milestone']):
+                score += 150
+            
+            # High priority: Wellness app plan for project/planning queries
+            elif ('wellness' in source or 'plan de trabajo' in source) and any(keyword in question_lower for keyword in 
+                ['workstream', 'ws', 'plan', 'project', 'development', 'objective', 'objetivo']):
+                score += 150
+            
+            # Medium priority: Documents containing project/planning information
+            if any(keyword in content for keyword in ['workstream', 'ws', 'fase', 'gate', 'milestone', 'deliverable', 'objetivo', 'entregables']):
+                score += 80
+            
+            # Medium priority: Documents mentioning timeline/schedule
+            if any(keyword in content for keyword in ['timeline', 'schedule', 'cronograma', 'roadmap', 'phase']):
+                score += 60
+            
+            # Medium priority: Documents with project structure
+            if any(keyword in content for keyword in ['workstream', 'ws', 'objective', 'scope', 'tasks']):
+                score += 50
+            
+            # Lower priority: General documents
+            if any(keyword in content for keyword in ['wellness', 'health', 'fitness', 'app']):
+                score += 20
+            
+            # Query relevance bonus
+            if any(word in content for word in question_lower.split()):
+                score += 10
+            
+            # Store the score in metadata for debugging
+            doc.metadata['priority_score'] = score
+            prioritized_docs.append((doc, score))
+        
+        # Sort by priority score (highest first)
+        prioritized_docs.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return just the documents (without scores)
+        result_docs = [doc for doc, score in prioritized_docs]
+        
+        # Debug logging
+        print(f"📊 Complex document prioritization for '{question}':")
+        for i, (doc, score) in enumerate(prioritized_docs[:5]):
+            source = doc.metadata.get('source', 'Unknown')
+            print(f"  {i+1}. {source} (score: {score})")
+        
+        return result_docs
 
     def _engineer_context(self, user_facts: dict, docs: list) -> dict:
         """Combine user facts with document context for prompt engineering."""
@@ -142,29 +309,53 @@ class ChatPipeline:
         """Detect if the question is related to product recommendations or Fuxion products."""
         question_lower = question.lower()
         
-        # Product-related keywords
+        # Product-related keywords (expanded)
         product_keywords = [
-            'product', 'recommend', 'suggestion', 'help with', 'looking for',
+            'product', 'products', 'recommend', 'recommendation', 'suggestion', 'help with', 'looking for',
             'need', 'want', 'trying to', 'goal', 'fitness', 'health', 'wellness',
             'weight', 'muscle', 'energy', 'immune', 'detox', 'cleanse', 'sleep',
             'stress', 'digestive', 'joint', 'beauty', 'anti-aging', 'sport',
-            'workout', 'exercise', 'diet', 'nutrition', 'supplement', 'vitamin'
+            'workout', 'exercise', 'diet', 'nutrition', 'supplement', 'vitamins',
+            'what is', 'tell me about', 'information about', 'details about',
+            'how to', 'best', 'top', 'popular', 'available', 'offer', 'catalog'
         ]
         
-        # Fuxion-specific keywords
+        # Fuxion-specific keywords (expanded)
         fuxion_keywords = [
             'fuxion', 'alpha balance', 'beauty-in', 'berry balance', 'biopro',
             'café', 'chocolate fit', 'flora liv', 'passion', 'prunex', 'thermo',
             'vita xtra', 'gano', 'golden flx', 'liquid fiber', 'no stress',
             'nutraday', 'protein', 'rexet', 'vera', 'vitaenergia', 'xpeed',
-            'xtra mile', 'youth elixir'
+            'xtra mile', 'youth elixir', 'ganomax', 'cappuccino', 'chocolate',
+            'flavor', 'stick', 'drink', 'shake', 'tea', 'coffee', 'latte'
         ]
+        
+        # Project/planning keywords that should NOT be treated as product queries
+        project_keywords = [
+            'timeline', 'schedule', 'cronograma', 'plan', 'workstream', 'ws', 'fase', 'gate',
+            'milestone', 'deliverable', 'project', 'development', 'implementation',
+            'roadmap', 'phase', 'objective', 'objetivo', 'entregables', 'tareas'
+        ]
+        
+        # Check if question contains project/planning keywords (these are NOT product queries)
+        has_project_keywords = any(keyword in question_lower for keyword in project_keywords)
+        if has_project_keywords:
+            return False  # This is a project/planning query, not a product query
         
         # Check if question contains product-related keywords
         has_product_keywords = any(keyword in question_lower for keyword in product_keywords)
         has_fuxion_keywords = any(keyword in question_lower for keyword in fuxion_keywords)
         
-        return has_product_keywords or has_fuxion_keywords
+        # Additional checks for common product question patterns
+        product_patterns = [
+            'what products', 'which products', 'show me products',
+            'product list', 'product catalog', 'product range',
+            'available products', 'product options', 'product selection'
+        ]
+        
+        has_product_patterns = any(pattern in question_lower for pattern in product_patterns)
+        
+        return has_product_keywords or has_fuxion_keywords or has_product_patterns
 
 # Example of how to use the new class
 if __name__ == "__main__":
@@ -184,4 +375,4 @@ if __name__ == "__main__":
             print("🤖", response['answer'])
     except Exception as e:
         print(f"❌ Error initializing chat pipeline: {e}")
-        print("Make sure Redis is running and properly configured.")
+        print("Local memory manager is now being used.")

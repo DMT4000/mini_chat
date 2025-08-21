@@ -482,54 +482,11 @@ def detect_profile_info(user_input: str):
 
 # Document-related question patterns (doc visibility / ingestion / retrieval status)
 DOC_QUESTION_PATTERNS = [
-    # Technical document access patterns
     r"\b(can you|do you) (see|access|read) (my|the) (docs|documents|files|pdfs)\b",
     r"\b(do you have|did you load|did you ingest) (my|the) (docs|documents|files|pdfs)\b",
     r"\bhow many (docs|documents|files|pdfs) (do you|did you) (see|load|ingest)\b",
     r"\bcan you see (\d+) (docs|documents|files|pdfs)\b",
     r"\bvector|faiss|ingest|index\b",
-    
-    # Capabilities and functionality questions
-    r"\b(what are|what is|tell me about|explain) (your|the) (capabilities|abilities|features|functions|skills)\b",
-    r"\b(what can|what do) you (do|help with|assist with|support)\b",
-    r"\b(how do|how can) you (help|assist|support|work)\b",
-    r"\b(what is|what does) this (agent|assistant|system|tool) (do|help with)\b",
-    r"\b(can you|do you) (help|assist|support|work) (with|on)\b",
-    r"\b(what|which) (documents|docs|files|plans|products) (can|do) you (see|access|read|know about)\b",
-    
-    # Wellness app plan related patterns
-    r"\b(wellness|wellness app|wellness application)\b",
-    r"\b(plan de trabajo|work plan|development plan)\b",
-    r"\b(workstream|work stream|ws\d*)\b",
-    r"\b(objetivo|objective|goal)\b",
-    r"\b(implementación|implementation|development)\b",
-    r"\b(fase|phase|stage)\b",
-    r"\b(milestone|hito|deliverable)\b",
-    
-    # Cronograma/timeline related patterns
-    r"\b(cronograma|timeline|schedule|calendar)\b",
-    r"\b(project timeline|project schedule)\b",
-    r"\b(gate|gateway|checkpoint)\b",
-    r"\b(deadline|due date|target date)\b",
-    r"\b(roadmap|project plan)\b",
-    
-    # Fuxion products related patterns
-    r"\b(fuxion|fuxión)\b",
-    r"\b(product|producto|products|productos)\b",
-    r"\b(supplement|suplemento|supplements|suplementos)\b",
-    r"\b(catalog|catálogo)\b",
-    r"\b(sku|weight loss|pérdida de peso)\b",
-    r"\b(nutrition|nutrición|health|salud)\b",
-    r"\b(café|chocolate|vitamin|vitamina)\b",
-    
-    # General document content patterns
-    r"\b(tell me about|what is|show me|explain)\b.*\b(plan|document|report|file)\b",
-    r"\b(what are|list|describe)\b.*\b(phases|stages|steps|components)\b",
-    r"\b(how is|how does|what does)\b.*\b(organized|structured|planned)\b",
-    
-    # Spanish language patterns
-    r"\b(cuál es|qué es|muéstrame|explícame)\b.*\b(plan|documento|reporte|archivo)\b",
-    r"\b(cómo está|qué tiene|cuáles son)\b.*\b(organizado|estructurado|planificado)\b",
 ]
 
 def is_document_question(user_input: str) -> bool:

@@ -1,0 +1,11 @@
+{
+  "user_id": "persistence_test_user",
+  "facts": {
+    "name": "Test User",
+    "test_value": "This should persist",
+    "timestamp": "2024-01-15"
+  },
+  "created_at": "2025-08-20T18:59:17.489478",
+  "updated_at": "2025-08-20T18:59:17.489494",
+  "version": "1.0"
+}
